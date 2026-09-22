@@ -7,6 +7,9 @@ on:
     paths:
       - "update.json"
 
+permissions:
+  contents: read
+
 jobs:
   send-notification:
     runs-on: ubuntu-latest
@@ -23,6 +26,12 @@ jobs:
       - name: Install Firebase Admin SDK
         run: npm install firebase-admin
 
+      - name: Check update.json
+        run: |
+          echo "Checking update.json..."
+          test -f update.json
+          node -e "const u=require('./update.json'); console.log('Version:', u.version); console.log('Title:', u.title); console.log('Message:', u.message);"
+
       - name: Send FCM notification
         env:
           FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
@@ -31,16 +40,33 @@ jobs:
           const admin = require("firebase-admin");
           const fs = require("fs");
 
+          if (!process.env.FIREBASE_SERVICE_ACCOUNT) {
+            throw new Error("FIREBASE_SERVICE_ACCOUNT secret is missing");
+          }
+
           const update = JSON.parse(
             fs.readFileSync("update.json", "utf8")
           );
 
           if (!update.title || !update.message) {
-            throw new Error("update.json must contain title and message");
+            throw new Error(
+              "update.json must contain title and message"
+            );
           }
 
           const serviceAccount = JSON.parse(
             process.env.FIREBASE_SERVICE_ACCOUNT
+          );
+
+          if (!serviceAccount.project_id) {
+            throw new Error(
+              "Service account JSON does not contain project_id"
+            );
+          }
+
+          console.log(
+            "Firebase project:",
+            serviceAccount.project_id
           );
 
           admin.initializeApp({
@@ -61,14 +87,29 @@ jobs:
               }
             };
 
-            const response = await admin.messaging().send(message);
+            const response =
+              await admin.messaging().send(message);
 
-            console.log("FCM notification sent successfully.");
-            console.log("Message ID:", response);
+            console.log(
+              "FCM notification sent successfully."
+            );
+
+            console.log(
+              "Message ID:",
+              response
+            );
           }
 
           sendNotification().catch((error) => {
-            console.error("FCM ERROR:", error.message);
+            console.error(
+              "FCM ERROR:",
+              error.code || "UNKNOWN"
+            );
+
+            console.error(
+              error.message
+            );
+
             process.exit(1);
           });
           EOF
