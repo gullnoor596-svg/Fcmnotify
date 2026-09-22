@@ -1,1 +1,49 @@
+name: Send FCM Notification
 
+on:
+  push:
+    paths:
+      - "update.json"
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout
+        uses: actions/checkout@v4
+
+      - name: Read update.json
+        id: update
+        run: |
+          VERSION=$(jq -r '.version' update.json)
+          TITLE=$(jq -r '.title' update.json)
+          MESSAGE=$(jq -r '.message' update.json)
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "message=$MESSAGE" >> "$GITHUB_OUTPUT"
+
+      - name: Send FCM
+        env:
+          FCM_TOKEN: ${{ secrets.FCM_SERVER_KEY }}
+          TOPIC: updates
+          TITLE: ${{ steps.update.outputs.title }}
+          MESSAGE: ${{ steps.update.outputs.message }}
+        run: |
+          curl -X POST \
+            -H "Authorization: Bearer $FCM_TOKEN" \
+            -H "Content-Type: application/json" \
+            https://fcm.googleapis.com/v1/projects/YOUR_FIREBASE_PROJECT_ID/messages:send \
+            -d "{
+              \"message\": {
+                \"topic\": \"$TOPIC\",
+                \"notification\": {
+                  \"title\": \"$TITLE\",
+                  \"body\": \"$MESSAGE\"
+                },
+                \"data\": {
+                  \"version\": \"${{ steps.update.outputs.version }}\"
+                }
+              }
+            }"
