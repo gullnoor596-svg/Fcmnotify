@@ -1,1 +1,112 @@
+name: Send FCM Notification
 
+on:
+  push:
+    branches:
+      - main
+    paths:
+      - "update.json"
+
+permissions:
+  contents: read
+
+jobs:
+  notify:
+    runs-on: ubuntu-latest
+
+    steps:
+      - name: Checkout repository
+        uses: actions/checkout@v4
+
+      - name: Read update.json
+        id: update
+        shell: bash
+        run: |
+          VERSION=$(jq -er '.version' update.json)
+          TITLE=$(jq -er '.title' update.json)
+          MESSAGE=$(jq -er '.message' update.json)
+
+          echo "version=$VERSION" >> "$GITHUB_OUTPUT"
+          echo "title=$TITLE" >> "$GITHUB_OUTPUT"
+          echo "message=$MESSAGE" >> "$GITHUB_OUTPUT"
+
+          echo "Version: $VERSION"
+          echo "Title: $TITLE"
+          echo "Message: $MESSAGE"
+
+      - name: Install Google Auth
+        run: |
+          python -m pip install --upgrade pip
+          python -m pip install google-auth requests
+
+      - name: Send FCM notification
+        env:
+          FIREBASE_SERVICE_ACCOUNT: ${{ secrets.FIREBASE_SERVICE_ACCOUNT }}
+          VERSION: ${{ steps.update.outputs.version }}
+          TITLE: ${{ steps.update.outputs.title }}
+          MESSAGE: ${{ steps.update.outputs.message }}
+        shell: python
+        run: |
+          import json
+          import os
+          import requests
+
+          from google.oauth2 import service_account
+          from google.auth.transport.requests import Request
+
+          PROJECT_ID = "ffbio-b7686a36"
+          TOPIC = "updates"
+
+          service_account_info = json.loads(
+              os.environ["FIREBASE_SERVICE_ACCOUNT"]
+          )
+
+          credentials = (
+              service_account.Credentials
+              .from_service_account_info(
+                  service_account_info,
+                  scopes=[
+                      "https://www.googleapis.com/auth/firebase.messaging"
+                  ]
+              )
+          )
+
+          credentials.refresh(Request())
+
+          url = (
+              f"https://fcm.googleapis.com/v1/projects/"
+              f"{PROJECT_ID}/messages:send"
+          )
+
+          payload = {
+              "message": {
+                  "topic": TOPIC,
+                  "notification": {
+                      "title": os.environ["TITLE"],
+                      "body": os.environ["MESSAGE"]
+                  },
+                  "data": {
+                      "version": os.environ["VERSION"]
+                  }
+              }
+          }
+
+          response = requests.post(
+              url,
+              headers={
+                  "Authorization": f"Bearer {credentials.token}",
+                  "Content-Type": "application/json"
+              },
+              json=payload,
+              timeout=30
+          )
+
+          print("FCM HTTP status:", response.status_code)
+          print("FCM response:", response.text)
+
+          response.raise_for_status()
+
+          print(
+              f"SUCCESS: notification sent for version "
+              f"{os.environ['VERSION']}"
+          )
